@@ -69,7 +69,8 @@ details.howto{margin-top:14px}
 .ab{font-size:10px;opacity:.8}
 .sc2{font-weight:bold;min-width:12px;text-align:right}
 .bracket-big{}
-#bracket.big{max-height:46vh;overflow:auto;align-items:flex-start;justify-content:flex-start}
+#bracket.big{max-height:46vh;overflow:auto;align-items:flex-start;justify-content:flex-start;padding:0 12px 12px 0}
+#brWrap{position:relative}
 #bracket.big .bcol{align-self:stretch}
 .legend{display:flex;flex-wrap:wrap;gap:4px 10px;justify-content:center;font-size:11px;margin:2px 0 8px;opacity:.95}
 .legend span{display:inline-flex;align-items:center;gap:4px}
@@ -263,6 +264,16 @@ body.touch #touch.on{display:flex}
   #topbar{margin-bottom:4px}
   .mini{padding:5px 10px;min-height:34px}
 }
+/* ---------- In-game scroll bars (the device's own bars are hidden) ---------- */
+html,body,#bracket,#overlayCard{scrollbar-width:none;-ms-overflow-style:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar,#bracket::-webkit-scrollbar,#overlayCard::-webkit-scrollbar{display:none}
+.sbar{position:absolute;background:rgba(0,0,0,.22);border-radius:8px;z-index:20;display:none;touch-action:none}
+.sbar.fixed{position:fixed;z-index:200}
+.sbar.v{right:2px;top:2px;bottom:2px;width:9px}
+.sbar.h{left:2px;right:14px;bottom:2px;height:9px}
+.sthumb{position:absolute;background:rgba(255,255,255,.85);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.35);cursor:grab}
+.sbar.v .sthumb{left:0;right:0}
+.sbar.h .sthumb{top:0;bottom:0}
 /* ---------- Polish ---------- */
 body{background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.55),transparent 55%),radial-gradient(ellipse at 90% 100%,rgba(255,255,160,.45),transparent 50%),linear-gradient(to bottom,#4fc3f7,#a5f3b5) fixed}
 #menu{border:1px solid rgba(255,255,255,.3);background:linear-gradient(160deg,rgba(25,55,120,.5),rgba(15,30,70,.38))}
@@ -336,7 +347,7 @@ body{background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.55),transpar
   <div id="screenTour" class="hidden">
     <h1>Tournament</h1>
     <p class="tmsg" id="tourMsg"></p>
-    <div id="bracket"></div>
+    <div id="brWrap"><div id="bracket"></div></div>
     <div class="legend" id="legend"></div>
     <div class="opts"><div class="orow" data-opt="tteam"><span class="lbl">Team</span><button class="chip active" data-val="1">Solo</button><button class="chip" data-val="2">With a friend</button></div><div class="orow" data-opt="tsize"><span class="lbl">Players</span><button class="chip" data-val="4">4</button><button class="chip active" data-val="8">8</button><button class="chip" data-val="16">16</button><button class="chip" data-val="32">32</button><button class="chip" data-val="64">64</button></div></div>
     <button id="tourGo" class="btn green">Start tournament</button>
@@ -861,6 +872,8 @@ function resetRound() {
   ai.plan = 0; ai.wait = 0; ai.missState = 0; ai.lastHit = -1;
 }
 
+// Serving is only allowed from a marked zone on your own side of the court.
+const serveZone = who => who === 1 ? [court.x + 10, midX - 150] : [midX + 150 - PW, court.x + court.w - PW - 10];
 function attachShuttle() {
   const p = G.server === 1 ? p1 : p2, dir = G.server === 1 ? 1 : -1;
   shuttle.x = p.x + PW / 2 + dir * (PW / 2 + 10);
@@ -924,6 +937,50 @@ function startGame(mode, diff, tour) {
   audio();
 }
 
+/* In-game scroll bars: native bars are hidden, these are drawn and dragged by the game. */
+function addBars(sc, host, evTarget, fixed) {
+  if (!document.documentElement || !sc || !host) return () => {};
+  const upds = [];
+  ['v', 'h'].forEach(ax => {
+    const V = ax === 'v', bar = document.createElement('div'), th = document.createElement('div');
+    bar.className = 'sbar ' + ax + (fixed ? ' fixed' : ''); th.className = 'sthumb';
+    bar.appendChild(th); host.appendChild(bar);
+    const m = () => ({ view: V ? sc.clientHeight : sc.clientWidth, tot: V ? sc.scrollHeight : sc.scrollWidth, pos: V ? sc.scrollTop : sc.scrollLeft });
+    const upd = () => {
+      const k = m();
+      if (k.tot <= k.view + 1) { bar.style.display = 'none'; return; }
+      bar.style.display = 'block';
+      const len = V ? bar.clientHeight : bar.clientWidth, tl = Math.max(28, len * k.view / k.tot);
+      th.style[V ? 'height' : 'width'] = tl + 'px';
+      th.style[V ? 'top' : 'left'] = ((len - tl) * k.pos / (k.tot - k.view)) + 'px';
+    };
+    const setPos = v => { if (V) sc.scrollTop = v; else sc.scrollLeft = v; };
+    let drag = null;
+    th.addEventListener('pointerdown', e => {
+      const k = m(), len = V ? bar.clientHeight : bar.clientWidth, tl = Math.max(28, len * k.view / k.tot);
+      drag = { s: V ? e.clientY : e.clientX, pos: k.pos, ratio: (k.tot - k.view) / Math.max(1, len - tl) };
+      th.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
+    });
+    th.addEventListener('pointermove', e => { if (drag) { setPos(drag.pos + ((V ? e.clientY : e.clientX) - drag.s) * drag.ratio); upd(); } });
+    const end = () => { drag = null; };
+    th.addEventListener('pointerup', end); th.addEventListener('pointercancel', end);
+    bar.addEventListener('pointerdown', e => {            // click the track to jump a page
+      if (e.target !== bar) return;
+      const r = th.getBoundingClientRect(), k = m(), dir = (V ? e.clientY < r.top : e.clientX < r.left) ? -1 : 1;
+      setPos(k.pos + dir * k.view * 0.9); upd();
+    });
+    evTarget.addEventListener('scroll', upd, { passive: true });
+    upds.push(upd);
+  });
+  const all = () => upds.forEach(f => f());
+  window.addEventListener('resize', all);
+  setInterval(all, 300);
+  return all;
+}
+addBars(document.documentElement, document.body, window, true);
+addBars($('bracket'), $('brWrap'), $('bracket'), false);
+{ const oc = $('overlayCard'); if (oc && oc.parentNode) addBars(oc, oc.parentNode, oc, false); }
+
 function goHome() {
   G.screen = 'menu'; G.paused = false;
   hideOverlay();
@@ -957,9 +1014,11 @@ function launchServe() {
 
 function isMatchPoint(me, opp) {
   const ns = me.score + 1, T = G.target;
-  return (ns >= T && ns - opp.score >= 2) || ns >= T + 5;
+  return (ns >= T && ns - opp.score >= 2) || ns > SD();
 }
 
+// All-square score at which the next point wins outright (tournament: 29-29).
+const SD = () => G.tour ? 29 : G.target + 4;
 const need = () => bo() === 3 ? 2 : 1;                      // games needed to win the match
 const pointWord = l => (bo() === 1 || G.games[l] + 1 >= need()) ? 'MATCH POINT' : 'GAME POINT';
 
@@ -967,7 +1026,7 @@ const pointWord = l => (bo() === 1 || G.games[l] + 1 >= need()) ? 'MATCH POINT' 
 function stateLabel() {
   if (G.over) return '';
   const a = p1.score, b = p2.score, T = G.target;
-  if (a === b && a >= T + 4) return 'SUDDEN DEATH';
+  if (a === b && a >= SD()) return 'SUDDEN DEATH';
   const zone = a >= T - 1 && b >= T - 1;
   if (zone && a === b) return 'DEUCE';
   if (zone && Math.abs(a - b) === 1) return 'ADVANTAGE ' + shortName(a > b ? 1 : 2);
@@ -981,7 +1040,7 @@ function announce(w) {
   G.streak[w]++; G.streak[o] = 0;
   const zone = a >= T - 1 && b >= T - 1;
   let text, sub, col = '#ffd54f', snd = 'alert';
-  if (a === b && a >= T + 4) { text = 'SUDDEN DEATH'; sub = 'Next point wins the ' + (bo() === 1 ? 'match' : 'game'); col = '#ff5252'; }
+  if (a === b && a >= SD()) { text = 'SUDDEN DEATH'; sub = 'Next point wins the ' + (bo() === 1 ? 'match' : 'game'); col = '#ff5252'; }
   else if (zone && a === b) { text = 'DEUCE'; sub = a + ' all - win by two'; }
   else if (zone && Math.abs(a - b) === 1) { const l = a > b ? 1 : 2, pw = pointWord(l); text = 'ADVANTAGE ' + shortName(l); sub = pw.charAt(0) + pw.slice(1).toLowerCase(); col = '#ff9100'; }
   else if (isMatchPoint(p1, p2) || isMatchPoint(p2, p1)) { const l = isMatchPoint(p1, p2) ? 1 : 2; text = pointWord(l); sub = shortName(l); col = '#ff9100'; }
@@ -1007,7 +1066,7 @@ function scorePoint(w) {
   floatText('+1', s.x, floorY - 24, wp.color === '#e53935' ? '#ff8a80' : '#82b1ff', 30, 55);
 
   const a = p1.score, b = p2.score, T = G.target;
-  if (((a >= T || b >= T) && Math.abs(a - b) >= 2) || a >= T + 5 || b >= T + 5) {
+  if (((a >= T || b >= T) && Math.abs(a - b) >= 2) || a > SD() || b > SD()) {
     G.over = true; G.winner = a > b ? 1 : 2; G.timer = 100;
     G.games[G.winner]++;
     G.matchDone = G.games[G.winner] >= need();
@@ -1024,7 +1083,7 @@ function scorePoint(w) {
    ========================================================= */
 const NAMES = ['Kenji', 'Maya', 'Rafa', 'Lina', 'Tomo', 'Zara', 'Ollie', 'Suki', 'Bram', 'Ivy', 'Dax', 'Nori', 'Pia', 'Hugo', 'Mina'];
 const RATE = { noob: 1, beginner: 2, intermediate: 3.2, advanced: 4.5, demon: 6 };
-const TOUR_T = 25;                                  // points to win a tournament match
+const TOUR_T = 21;                                  // points to win a tournament match
 const ROUND_NAMES = ['Round of 64', 'Round of 32', 'Round of 16', 'Quarterfinal', 'Semifinal', 'Final'];
 const LV_ORDER = ['noob', 'noob', 'beginner', 'beginner', 'intermediate', 'advanced', 'demon'];
 const LV_ABBR = { noob: 'Noo', beginner: 'Beg', intermediate: 'Int', advanced: 'Adv', demon: 'Dem' };
@@ -1459,6 +1518,10 @@ function update() {
   p2.input = G.mode === 'ai' ? aiInput() : p2Input();
   stepPlayer(p1, p1.input, canAct);
   stepPlayer(p2, p2.input, canAct);
+  if (G.phase === 'serve') {                          // the server must stay inside the serve zone
+    const sp = G.server === 1 ? p1 : p2, z = serveZone(G.server);
+    sp.x = Math.max(z[0], Math.min(z[1], sp.x));
+  }
 
   if (G.phase === 'serve') {
     G.timer--;
@@ -1610,6 +1673,20 @@ function drawSprite(color, pose, num, x, y, alpha) {
   ctx.restore();
 }
 
+function drawServeZone() {
+  if (G.phase !== 'serve' || G.over) return;
+  const z = serveZone(G.server), x0 = z[0], x1 = z[1] + PW;
+  const pulse = 0.55 + 0.25 * Math.sin(G.t * 0.2);
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,235,59,' + (0.22 * pulse) + ')';
+  ctx.fillRect(x0, floorY - 4, x1 - x0, 22);
+  ctx.strokeStyle = 'rgba(255,235,59,' + pulse + ')'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x0, floorY - 14); ctx.lineTo(x0, floorY + 18); ctx.lineTo(x1, floorY + 18); ctx.lineTo(x1, floorY - 14);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawPlayer(p) {
   const cx = p.x + PW / 2;
   const air = floorY - (p.y + PH);
@@ -1724,6 +1801,7 @@ function render() {
   drawWind();
   drawNet();
   ghosts.forEach(g => drawSprite(g.color, g.pose, g.num, g.x, g.y, (g.life / 12) * 0.38));
+  drawServeZone();
   drawPlayer(p1);
   drawPlayer(p2);
   drawShuttle();
