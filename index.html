@@ -315,7 +315,7 @@ body{background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.55),transpar
       <b>Player 1:</b> <kbd>W</kbd> jump <kbd>A</kbd><kbd>D</kbd> move <kbd>S</kbd> drop <kbd>E</kbd> dash <kbd>Q</kbd> power<br>
       <b>Player 2:</b> <kbd>Up</kbd> jump <kbd>Left</kbd><kbd>Right</kbd> move <kbd>Down</kbd> drop <kbd>.</kbd> dash <kbd>/</kbd> power<br>
       <div class="moves">
-        <b>Tournament:</b> a bracket against AI of every skill, first to 25, best of 3 final. Pick With a friend to share one side and swap the controls every point.<br>
+        <b>Tournament:</b> a bracket against AI of every skill, first to 25, best of 3 final. Pick 2v2 with a friend to team up on one side against pairs of AI.<br>
       <b>Smash:</b> jump above the net and hit the shuttle. <b>Drop:</b> hold drop as you hit.<br>
         <b>Lunge lob:</b> dash into the shuttle and hit it for a high, deep lob that gives you time to recover.<br>
         <b>Power shot:</b> hits and points fill the power bar; press power to arm it, then your next hit is a blazing shot.<br>
@@ -325,7 +325,7 @@ body{background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.55),transpar
     </div>
     <div class="help thelp">
       Use the on-screen buttons (in 2 Player, each player uses their own side).<br>
-      <b>Tournament:</b> a bracket vs AI, first to 25. Team up with a friend and pass the device every point.<br>
+      <b>Tournament:</b> a bracket vs AI, first to 25. Pick 2v2 to team up with a friend against pairs of AI.<br>
       <b>Smash:</b> jump above the net and hit the shuttle.<br>
       <b>Drop:</b> hold the drop button as you hit.<br>
       <b>Lunge lob:</b> dash into the shuttle for a high, deep lob.<br>
@@ -349,7 +349,7 @@ body{background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.55),transpar
     <p class="tmsg" id="tourMsg"></p>
     <div id="brWrap"><div id="bracket"></div></div>
     <div class="legend" id="legend"></div>
-    <div class="opts"><div class="orow" data-opt="tteam"><span class="lbl">Team</span><button class="chip active" data-val="1">Solo</button><button class="chip" data-val="2">With a friend</button></div><div class="orow" data-opt="tsize"><span class="lbl">Players</span><button class="chip" data-val="4">4</button><button class="chip active" data-val="8">8</button><button class="chip" data-val="16">16</button><button class="chip" data-val="32">32</button><button class="chip" data-val="64">64</button></div></div>
+    <div class="opts"><div class="orow" data-opt="tteam"><span class="lbl">Team</span><button class="chip active" data-val="1">Solo</button><button class="chip" data-val="2">2v2 with a friend</button></div><div class="orow" data-opt="tsize"><span class="lbl">Players</span><button class="chip" data-val="4">4</button><button class="chip active" data-val="8">8</button><button class="chip" data-val="16">16</button><button class="chip" data-val="32">32</button><button class="chip" data-val="64">64</button></div></div>
     <button id="tourGo" class="btn green">Start tournament</button>
     <button id="tourRedraw" class="btn ghost">Redraw bracket</button>
     <button id="tourBack" class="btn ghost"><span data-icon="back"></span>Back</button>
@@ -478,7 +478,7 @@ const G = {
   shake: 0, netWob: 0, t: 0, freeze: 0, banner: null, streak: [0, 0, 0],
   bestOf: 1, games: [0, 0, 0], gameNo: 1, matchDone: false, arena: 'std', spd: 1,
   wind: 0, windT: 0, windTarget: 0, windPhase: 0,
-  team: false, tagTurn: 1, tour: false, oppName: '', tourLabel: '', fmtOverride: 0
+  team: false, srvIdx: [0, 1, 1], tour: false, oppName: '', tourLabel: '', fmtOverride: 0
 };
 const bo = () => G.fmtOverride || G.bestOf;
 
@@ -494,6 +494,14 @@ function makePlayer(num) {
   };
 }
 const p1 = makePlayer(1), p2 = makePlayer(2);
+// 2v2: a partner on each side (only used when G.team is on). Partners share their side's power meter and stats.
+const p1b = makePlayer(1), p2b = makePlayer(2);
+p1b.color = '#1e66ff'; p2b.color = '#fb8c00';
+[[p1b, p1], [p2b, p2]].forEach(([b, m]) => ['meter', 'stats'].forEach(k =>
+  Object.defineProperty(b, k, { get: () => m[k], set: v => { m[k] = v; }, configurable: true })));
+const sideList = n => G.team ? (n === 1 ? [p1, p1b] : [p2, p2b]) : (n === 1 ? [p1] : [p2]);
+const allPlayers = () => G.team ? [p1, p1b, p2, p2b] : [p1, p2];
+const serverP = () => G.server === 1 ? (G.team && G.srvIdx[1] === 2 ? p1b : p1) : (G.team && G.srvIdx[2] === 2 ? p2b : p2);
 const shuttle = { x: 0, y: 0, vx: 0, vy: 0, lastHitBy: 0, trail: [], power: false, netFlag: 0, netCD: 0 };
 
 let parts = [], texts = [], rings = [], ghosts = [];
@@ -522,7 +530,7 @@ function spriteSVG(color, pose) {
     '</svg>';
 }
 const SPR = {};
-['#e53935', '#1e66ff'].forEach(c => {
+['#e53935', '#1e66ff', '#2e9e4f', '#fb8c00'].forEach(c => {
   SPR[c] = {};
   ['idle', 'a', 'b', 'air'].forEach(po => {
     const im = new Image();
@@ -611,7 +619,7 @@ const touch = [null, newTouch(), newTouch()];     // touch[1] = player 1 pad, to
 const c = code => !!keys['c:' + code];
 
 function p1Input() {
-  const ai = G.mode === 'ai', t = touch[1];     // in 1 Player the arrow keys work too
+  const ai = G.mode === 'ai' && !G.team, t = touch[1];     // in 1 Player the arrow keys work too (not in 2v2)
   const l = !!(keys['a'] || t.left || (ai && keys['arrowleft']));
   const r = !!(keys['d'] || t.right || (ai && keys['arrowright']));
   return {
@@ -622,6 +630,7 @@ function p1Input() {
     power: !!(c('KeyQ') || t.power || (ai && c('Slash')))
   };
 }
+const friendInput = () => p2Input();
 function p2Input() {
   const t = touch[2];
   return {
@@ -856,11 +865,16 @@ function fx() {
    Game flow
    ========================================================= */
 const nameOf = n => G.mode === 'ai' ? (n === 1 ? 'YOU' : (G.oppName || 'CPU') + ' - ' + AI[G.diff].label) : 'PLAYER ' + n;
-const shortName = n => G.mode === 'ai' ? (n === 1 ? (G.team ? 'TEAM' : 'YOU') : (G.oppName || 'CPU')) : 'PLAYER ' + n;
+const shortName = n => G.mode === 'ai' ? (n === 1 ? (G.team ? 'YOU & FRIEND' : 'YOU') : (G.oppName || 'CPU')) : 'PLAYER ' + n;
 
 function resetRound() {
-  p1.x = court.x + 10; p2.x = court.x + court.w - 40;
-  [p1, p2].forEach(p => {
+  if (G.team) {                                         // doubles: the server stands back, the partner up by the net
+    const s1 = G.srvIdx[1] === 2 ? p1b : p1, o1 = s1 === p1 ? p1b : p1;
+    const s2 = G.srvIdx[2] === 2 ? p2b : p2, o2 = s2 === p2 ? p2b : p2;
+    s1.x = court.x + 10; o1.x = midX - 130;
+    s2.x = court.x + court.w - 40; o2.x = midX + 100;
+  } else { p1.x = court.x + 10; p2.x = court.x + court.w - 40; }
+  allPlayers().forEach(p => {
     p.y = floorY - PH; p.vy = 0; p.vx = 0; p.onGround = true; p.wasGround = true;
     p.swing = 0; p.hitCD = 0; p.armed = 0; p.lunge = 0; p.dashT = 0; p.dashCD = 0;
   });
@@ -869,27 +883,31 @@ function resetRound() {
   shuttle.power = false; shuttle.netFlag = 0; shuttle.netCD = 0;
   ghosts = [];
   attachShuttle();
-  ai.plan = 0; ai.wait = 0; ai.missState = 0; ai.lastHit = -1;
+  [ai, aiB].forEach(a => { a.plan = 0; a.wait = 0; a.missState = 0; a.lastHit = -1; });
 }
 
 // Serving is only allowed from a marked zone on your own side of the court.
 const serveZone = who => who === 1 ? [court.x + 10, midX - 150] : [midX + 150 - PW, court.x + court.w - PW - 10];
 function attachShuttle() {
-  const p = G.server === 1 ? p1 : p2, dir = G.server === 1 ? 1 : -1;
+  const p = serverP(), dir = G.server === 1 ? 1 : -1;
   shuttle.x = p.x + PW / 2 + dir * (PW / 2 + 10);
   shuttle.y = p.y + PH * 0.45;
 }
 
 function setFooter() {
-  footer.textContent = G.mode === 'ai'
+  footer.textContent = G.team
+    ? 'You (red): W jump, A/D move, S drop, E dash, Q power  |  Friend (blue): arrows, Down drop, . dash, / power  |  P pause'
+    : G.mode === 'ai'
     ? 'Move: WASD or arrow keys  |  Drop: S / Down  |  Dash: E / Shift  |  Power: Q or /  |  Dash + hit = Lunge Lob  |  P pause  |  M mute'
     : 'P1: W jump, A/D move, S drop, E dash, Q power  |  P2: arrows, Down drop, . dash, / power  |  Dash + hit = Lunge Lob  |  P pause';
 }
 
 function resetMatch() {
   p1.score = p2.score = 0; p1.meter = p2.meter = 0;
-  p1.color = '#e53935';
-  p1.speed = 5; p2.speed = G.mode === 'ai' ? AI[G.diff].speed : 5;
+  p1.color = '#e53935'; p1b.color = '#1e66ff';
+  p2.color = G.team ? '#2e9e4f' : '#1e66ff'; p2b.color = '#fb8c00';
+  G.srvIdx = [0, 1, 1];
+  p1.speed = 5; p1b.speed = 5; p2.speed = G.mode === 'ai' ? AI[G.diff].speed : 5; p2b.speed = p2.speed;
   G.server = 1; G.over = false; G.winner = 0; G.best = 0; G.paused = false;
   G.banner = null; G.streak = [0, 0, 0];
   G.games = [0, 0, 0]; G.gameNo = 1; G.matchDone = false;
@@ -924,13 +942,12 @@ function startGame(mode, diff, tour) {
   G.arena = 'std'; G.bestOf = 1; G.spd = 1;
   G.target = tour ? TOUR_T : userTarget;
   if (!tour) G.team = false;
-  G.tagTurn = 1;
   G.mode = mode;
   if (diff) G.diff = diff;
   G.screen = 'game';
   menu.classList.add('hidden');
   gameWrap.classList.remove('hidden');
-  buildTouch(mode);
+  buildTouch(G.team ? '2p' : mode);
   touchUI.classList.add('on');
   releaseAll();
   resetMatch();
@@ -996,10 +1013,12 @@ function goHome() {
   refreshBadges();
 }
 
+// The opponent to aim away from: in 2v2, the one nearest the shuttle.
+const foeOf = (side, x) => { const l = sideList(side === 1 ? 2 : 1); return l.length > 1 && Math.abs(l[1].x - x) < Math.abs(l[0].x - x) ? l[1] : l[0]; };
 function launchServe() {
-  const p = G.server === 1 ? p1 : p2, dir = G.server === 1 ? 1 : -1;
+  const p = serverP(), dir = G.server === 1 ? 1 : -1;
   const cfg = (G.mode === 'ai' && G.server === 2) ? AI[G.diff] : null;
-  const foe = G.server === 1 ? p2 : p1;
+  const foe = foeOf(G.server, shuttle.x);
   const tx = pickTarget('serve', dir, foe, cfg, null);
   let shot = aimShot(shuttle.x, shuttle.y, dir, -9.5, tx) || { vx: dir * 5, vy: -9.5 };
   // weaker CPUs sometimes serve badly (into the net or too short)
@@ -1057,8 +1076,8 @@ function scorePoint(w) {
   const wp = w === 1 ? p1 : p2;
   wp.score++; wp.stats.pts++;
   wp.meter = Math.min(100, wp.meter + 25);
+  if (G.team && G.server !== w) G.srvIdx[w] = 3 - G.srvIdx[w];   // side out: the other partner serves next
   G.server = w; G.lastWinner = w; G.phase = 'point'; G.timer = 85;
-  if (G.team) { G.tagTurn = 3 - G.tagTurn; p1.color = G.tagTurn === 1 ? '#e53935' : '#1e66ff'; }               // team mode: hand the controls over every point
   rings.push({ x: s.x, y: floorY, r: 4, life: 26, max: 26 });
   dust(s.x, floorY - 2, 8);
   G.shake = Math.max(G.shake, 2);
@@ -1094,7 +1113,10 @@ function newTournament() {
   const cnt = tourCnt;
   // same mix of skill at every size: roughly 2/7 noob, 2/7 beginner, 1/7 each of the rest
   const lv = shuffle(Array.from({ length: cnt - 1 }, (_, i) => LV_ORDER[i % 7]));
-  const nm = Array.from({ length: cnt - 1 }, (_, i) => NAMES[i % NAMES.length].toUpperCase() + (i >= NAMES.length ? ' ' + (Math.floor(i / NAMES.length) + 1) : ''));
+  const nm = Array.from({ length: cnt - 1 }, (_, i) => {
+    const a = NAMES[i % NAMES.length].toUpperCase() + (i >= NAMES.length ? ' ' + (Math.floor(i / NAMES.length) + 1) : '');
+    return tourTeam === 2 ? a + ' & ' + NAMES[(i * 7 + 4) % NAMES.length].toUpperCase() : a;   // 2v2: opponents are pairs
+  });
   shuffle(nm);
   const ent = [{ name: tourTeam === 2 ? 'TEAM' : 'YOU', lvl: 'you', you: true }].concat(lv.map((l, i) => ({ name: nm[i], lvl: l })));
   const mk = (a, b) => ({ a: a || null, b: b || null, w: null, sa: 0, sb: 0 });
@@ -1274,12 +1296,18 @@ function togglePause() {
 /* =========================================================
    AI
    ========================================================= */
-const ai = { tx: BASE_X, plan: 0, wait: 0, missState: 0, jumpOK: false, lastHit: -1, phase: '' };
+const mkAI = () => ({ tx: BASE_X, plan: 0, wait: 0, missState: 0, jumpOK: false, lastHit: -1, phase: '' });
+const ai = mkAI(), aiB = mkAI();
 
-function aiInput() {
-  const cfg = AI[G.diff], p = p2, cx = p.x + PW / 2, h = hand(p);
+function aiInput(p, ai) {
+  const cfg = AI[G.diff], cx = p.x + PW / 2, h = hand(p);
   const inp = { ax: 0, jump: false, drop: false, dash: false, power: false };
-  const incoming = G.phase === 'rally' && shuttle.lastHitBy !== 2 && (shuttle.x > midX || shuttle.vx > 0);
+  let incoming = G.phase === 'rally' && shuttle.lastHitBy !== 2 && (shuttle.x > midX || shuttle.vx > 0);
+  if (incoming && G.team) {                          // 2v2: only the partner nearer the shuttle goes for it
+    const mate = p === p2 ? p2b : p2, dMe = Math.abs(cx - shuttle.x), dMate = Math.abs(mate.x + PW / 2 - shuttle.x);
+    ai.lead = dMe + (p === p2 ? -1 : 1) < dMate + (ai.lead ? 20 : 0);
+    incoming = ai.lead;
+  }
   const changed = ai.lastHit !== shuttle.lastHitBy || ai.phase !== G.phase;
 
   if (--ai.plan <= 0 || changed) {
@@ -1290,7 +1318,7 @@ function aiInput() {
       }
     }
     ai.jumpOK = Math.random() < cfg.jump;
-    let tx = BASE_X;
+    let tx = G.team && p === p2b ? BASE_X - 130 : BASE_X;
     if (incoming) {
       let landX = shuttle.x;                         // weak levels just chase the shuttle
       if (Math.random() < cfg.predict) {             // better levels read where it will land
@@ -1428,7 +1456,7 @@ function tryHit(p) {
   const reach = (REACH + (p.dashT > 0 ? 12 : 0)) * (cfg ? cfg.reach : 1);
   if (Math.hypot(s.x - h.x, s.y - h.y) > reach + SR) return;
 
-  const dir = num === 1 ? 1 : -1, foe = num === 1 ? p2 : p1;
+  const dir = num === 1 ? 1 : -1, foe = foeOf(num, s.x);
   const inp = p.input;
   const canSmash = !p.onGround && s.y < NET.top - 10 && s.y < h.y + 10;
   const wasSave = s.netFlag > 0;
@@ -1508,11 +1536,11 @@ function update() {
 
   const canAct = G.phase === 'serve' || G.phase === 'rally';
   p1.input = p1Input();
-  p2.input = G.mode === 'ai' ? aiInput() : p2Input();
-  stepPlayer(p1, p1.input, canAct);
-  stepPlayer(p2, p2.input, canAct);
+  p2.input = G.mode === 'ai' ? aiInput(p2, ai) : p2Input();
+  if (G.team) { p1b.input = friendInput(); p2b.input = aiInput(p2b, aiB); }
+  allPlayers().forEach(p => stepPlayer(p, p.input, canAct));
   if (G.phase === 'serve') {                          // the server must stay inside the serve zone
-    const sp = G.server === 1 ? p1 : p2, z = serveZone(G.server);
+    const sp = serverP(), z = serveZone(G.server);
     sp.x = Math.max(z[0], Math.min(z[1], sp.x));
   }
 
@@ -1523,12 +1551,12 @@ function update() {
     if (G.timer <= 0) launchServe();
   } else if (G.phase === 'rally') {
     stepShuttle();
-    if (G.phase === 'rally') { tryHit(p1); tryHit(p2); }
+    if (G.phase === 'rally') allPlayers().forEach(tryHit);
   } else if (G.phase === 'point') {
     if (--G.timer <= 0) { if (G.over) endMatch(); else resetRound(); }
   }
 
-  updateRacket(p1); updateRacket(p2);
+  allPlayers().forEach(updateRacket);
   fx();
 }
 
@@ -1811,8 +1839,7 @@ function render() {
   drawNet();
   ghosts.forEach(g => drawSprite(g.color, g.pose, g.num, g.x, g.y, (g.life / 12) * 0.38));
   drawServeZone();
-  drawPlayer(p1);
-  drawPlayer(p2);
+  allPlayers().forEach(drawPlayer);
   drawShuttle();
   ctx.restore();
 
@@ -1851,7 +1878,7 @@ function setW(el, v) { v = Math.round(v); if (el._w !== v) { el._w = v; el.style
 function updateHUD() {
   for (let i = 1; i <= 2; i++) {
     const p = i === 1 ? p1 : p2, h = hud[i];
-    setText(h.n, G.team && i === 1 ? (G.tagTurn === 1 ? 'YOU' : 'FRIEND') : shortName(i));
+    setText(h.n, shortName(i));
     setText(h.s, String(p.score));
     if (shownScore[i] !== p.score) {
       if (p.score > shownScore[i]) { h.s.classList.remove('pop'); void h.s.offsetWidth; h.s.classList.add('pop'); }
@@ -1866,9 +1893,8 @@ function updateHUD() {
     if (h.pips._v !== pip) { h.pips._v = pip; h.pips.innerHTML = pip; }
   }
   const st = stateLabel();
-  const nm1 = $('n1').parentNode; if (nm1 && nm1.firstChild) nm1.firstChild.style.background = G.team && G.tagTurn === 2 ? '#1e66ff' : '';
-  touchUI.classList.toggle('blue', G.team && G.tagTurn === 2);
-  setText(stateEl, st || (G.rally > 0 ? 'Rally ' + G.rally : (G.team && !G.over ? (G.tagTurn === 1 ? 'YOU' : 'FRIEND') + ' up next' : '')));
+  const nm2 = $('n2').parentNode; if (nm2 && nm2.firstChild) nm2.firstChild.style.background = G.team ? '#2e9e4f' : '';
+  setText(stateEl, st || (G.rally > 0 ? 'Rally ' + G.rally : ''));
   stateEl.classList.toggle('alert', !!st);
 }
 
